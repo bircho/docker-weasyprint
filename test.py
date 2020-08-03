@@ -76,5 +76,33 @@ class TestMultiple(unittest.TestCase):
         self.assertEqual(len(pages), 2)
 
 
+class TestZip2Pdf(unittest.TestCase):
+
+    def setUp(self):
+        url = 'http://127.0.0.1:5001/zip2pdf?filename=sample.pdf'
+        headers = {
+            'Content-Type': 'application/zip'
+        }
+        zip_name = 'test.zip'
+        with open(zip_name, mode='rb') as file:
+            zip_data = file.read()
+        request = Request(url, data=zip_data, headers=headers, method='POST')
+        self.response = urlopen(request)
+
+    def tearDown(self):
+        self.response.close()
+
+    def test_response_code(self):
+        self.assertEqual(self.response.getcode(), 200)
+
+    def test_headers(self):
+        headers = dict(self.response.info())
+        self.assertEqual(headers['Content-Type'], 'application/pdf')
+        self.assertEqual(headers['Content-Disposition'], 'inline;filename=sample.pdf')
+
+    def test_body(self):
+        self.assertEqual(self.response.read()[:4], b'%PDF')
+
+
 if __name__ == '__main__':
     unittest.main()

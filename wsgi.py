@@ -3,7 +3,11 @@
 import json
 import os
 import logging
+import glob
+import zipfile
 from functools import wraps
+from io import BytesIO
+from tempfile import TemporaryDirectory
 
 from flask import Flask, request, make_response, abort
 from weasyprint import HTML, CSS
@@ -46,6 +50,7 @@ def setup_logging():
         '%(asctime)s %(levelname)s: %(message)s '
         '[in %(pathname)s:%(lineno)d]'
     ))
+    app.logger.handlers.clear()
     app.logger.addHandler(handler)
     app.logger.setLevel(logging.DEBUG)
 
@@ -61,6 +66,9 @@ def home():
                 <li>POST to <code>/multiple?filename=myfile.pdf</code>. The body
                     should contain a JSON list of html strings. They will each
                     be rendered and combined into a single pdf</li>
+                <li>POST to <code>/zip2pdf?filename=myfile.pdf</code>. The body
+                    should contain a .zip file with at least one html file. Can
+                    be used for image heavy pages.</li>
             </ul>
         '''
 
@@ -97,6 +105,34 @@ def multiple():
     response.headers['Content-Type'] = 'application/pdf'
     response.headers['Content-Disposition'] = 'inline;filename=%s' % name
     app.logger.info(' ==> POST  /multiple?filename=%s  ok' % name)
+    return response
+
+
+@app.route('/zip2pdf', methods=['POST'])
+@authenticate
+def zip2pdf():
+    name = request.args.get('filename', 'unnamed.pdf')
+    app.logger.info('POST  /zip2pdf?filename=%s' % name)
+    with TemporaryDirectory(prefix='weasyprint-') as temp_dir:
+        with zipfile.ZipFile(BytesIO(request.data), mode='r') as myzip:
+            myzip.extractall(temp_dir)
+        htmls = glob.glob(os.path.join(temp_dir, '**/*.html'), recursive=True)
+        csss = glob.glob(os.path.join(temp_dir, '**/*.css'), recursive=True)
+        if len(htmls) == 0:
+            app.logger.warning('Zip archive contain no html files.')
+            abort(400)
+        elif len(htmls) == 1:
+            html = HTML(filename=htmls[0])
+            css = [CSS(filename=sheet) for sheet in csss]
+            pdf = html.write_pdf(stylesheets=css)
+        else:
+            documents = [HTML(filename=html).render() for html in htmls]
+            pdf = documents[0].copy([page for doc in documents for page in doc.pages]).write_pdf()
+
+    response = make_response(pdf)
+    response.headers['Content-Type'] = 'application/pdf'
+    response.headers['Content-Disposition'] = 'inline;filename=%s' % name
+    app.logger.info(' ==> POST  /zip2pdf?filename=%s  ok' % name)
     return response
 
 
